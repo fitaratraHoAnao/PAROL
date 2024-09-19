@@ -1,72 +1,69 @@
-from flask import Flask, jsonify, request
-import requests
+from flask import Flask, request, jsonify
 from bs4 import BeautifulSoup
+import requests
 
 app = Flask(__name__)
 
-# Fonction pour extraire les données d'une chanson spécifique
+# Fonction pour extraire les données de la chanson
 def get_song_data(song_url):
+    # Envoyer la requête GET à l'URL
     response = requests.get(song_url)
     soup = BeautifulSoup(response.content, 'html.parser')
+    
+    # Vérifier la présence du titre de la chanson (balise h1 ou autre)
+    title_element = soup.find('h1')
+    title = title_element.get_text(strip=True) if title_element else 'Title not found'
 
-    title = soup.find('h1').get_text(strip=True)
-    artist = soup.find('h2').get_text(strip=True)
+    # Vérifier la présence de l'artiste (balise h2 ou autre)
+    artist_element = soup.find('h2')
+    artist = artist_element.get_text(strip=True) if artist_element else 'Artist not found'
+
+    # Chercher les paroles (lyrics) dans un div avec class 'song-text' (adapter si nécessaire)
     lyrics_div = soup.find('div', class_='song-text')
     lyrics = lyrics_div.get_text("\n", strip=True) if lyrics_div else 'Lyrics not found'
 
+    # Retourner les données sous forme de dictionnaire
     return {
         'title': title,
         'artist': artist,
         'lyrics': lyrics
     }
 
-# Fonction pour extraire les informations d'un chanteur
-def get_singer_songs(singer):
-    url = f'https://tononkira.serasera.org/mpihira/{singer}'
-    response = requests.get(url)
-    soup = BeautifulSoup(response.content, 'html.parser')
-
-    # Extraction des informations principales sur le chanteur
-    singer_name = soup.find('h1').get_text(strip=True)
-    songs = []
-    
-    # Supposons que les chansons soient listées dans des <a> avec un lien vers chaque chanson
-    song_links = soup.find_all('a', href=True, text=True)
-    
-    for link in song_links:
-        song_title = link.get_text(strip=True)
-        song_url = f"https://tononkira.serasera.org{link['href']}"
-        songs.append({
-            'title': song_title,
-            'url': song_url
-        })
-
-    return {
-        'singer': singer_name,
-        'songs': songs
-    }
-
-# Route pour chercher un chanteur
+# Route pour rechercher un chanteur et retourner les chansons (exemple basique)
 @app.route('/search', methods=['GET'])
-def search_singer():
+def search_songs():
     singer = request.args.get('singer')
-    if singer:
-        # Appel de la fonction pour extraire les chansons du chanteur
-        singer_data = get_singer_songs(singer)
-        return jsonify(singer_data)
-    else:
-        return jsonify({'error': 'Please provide a singer name'}), 400
+    if not singer:
+        return jsonify({'error': 'Singer not specified'}), 400
+    
+    # Exemple d'URL de recherche (adapter si nécessaire)
+    search_url = f'https://tononkira.serasera.org/search?q={singer}'
+    
+    response = requests.get(search_url)
+    soup = BeautifulSoup(response.content, 'html.parser')
+    
+    # Extraire les liens vers les chansons (à adapter selon la structure HTML)
+    song_links = soup.find_all('a', href=True, text=True)
+    songs = []
+    for link in song_links:
+        songs.append({
+            'title': link.get_text(strip=True),
+            'url': link['href']
+        })
+    
+    return jsonify({'singer': singer, 'songs': songs})
 
-# Route pour chercher une chanson spécifique et récupérer ses paroles
+# Route pour obtenir les détails d'une chanson
 @app.route('/song', methods=['GET'])
 def get_song():
     song_url = request.args.get('url')
-    if song_url:
-        song_data = get_song_data(song_url)
-        return jsonify(song_data)
-    else:
-        return jsonify({'error': 'Please provide a song URL'}), 400
+    if not song_url:
+        return jsonify({'error': 'Song URL not specified'}), 400
+    
+    # Appeler la fonction pour extraire les données de la chanson
+    song_data = get_song_data(song_url)
+    
+    return jsonify(song_data)
 
-# Exécuter l'application Flask avec host '0.0.0.0'
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
