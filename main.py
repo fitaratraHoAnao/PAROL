@@ -67,5 +67,6 @@ def get_song():
     else:
         return jsonify({'error': 'Please provide a song URL'}), 400
 
+# Exécuter l'application Flask avec host '0.0.0.0'
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
