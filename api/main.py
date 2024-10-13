@@ -1,101 +1,106 @@
 from flask import Flask, jsonify, request
 import requests
 from bs4 import BeautifulSoup
+import re
+import unicodedata
 
 app = Flask(__name__)
 
-# Function to scrape songs from a specific page
-def scrape_page(page_number):
-    url = f'https://tononkira.serasera.org/hira/?page={page_number}'
-    response = requests.get(url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-
-    songs = []
-    song_items = soup.find_all('div', class_='border p-2 mb-3')  # Each song is in this div
-
-    for item in song_items:
-        # Extract the title from the link
-        title_tag = item.find('a')
-        title = title_tag.text.strip()
-
-        # Extract the artist name
-        artist_tag = title_tag.find_next('a')
-        artist = artist_tag.text.strip()
-
-        # Extract the number of likes (number after the heart icon)
-        likes_tag = item.find('i', class_='bi-heart-fill')
-        if likes_tag:
-            likes = likes_tag.find_next(string=True).strip()
-        else:
-            likes = '0'
-
-        songs.append({
-            'title': title,
-            'artist': artist,
-            'likes': likes
-        })
-
-    return songs
-
-# Function to scrape the lyrics page
-def scrape_lyrics(song_url):
-    response = requests.get(song_url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-
-    # Find the section that contains the lyrics
-    lyrics_div = soup.find('div', class_='fst-italic')  # Adjust this based on your page structure
-    if not lyrics_div:
-        return None
-
-    # Extract the lyrics
-    lyrics = lyrics_div.get_text(separator='\n').strip()
-    return lyrics
-
-# Function to search for a song's URL based on the title and artist
-def find_song_url(texte):
-    base_url = 'https://tononkira.serasera.org'
-    search_url = f'{base_url}/tononkira?lohateny={texte.replace(" ", "%20")}'
-    
-    response = requests.get(search_url)
-    soup = BeautifulSoup(response.text, 'html.parser')
-
-    # Find the link to the song page (adjusted to be more flexible)
-    song_link = soup.find('a', href=True, string=lambda s: texte.lower() in s.lower())  # Make the search case-insensitive
-    if song_link:
-        return base_url + song_link['href']
+# Fonction pour convertir une chaîne en slug compatible avec l'URL
+def slugify(value):
+    if value:
+        value = str(value)
+        # Normaliser les caractères spéciaux
+        value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+        # Supprimer les caractères non alphanumériques
+        value = re.sub('[^\w\s-]', '', value).strip().lower()
+        # Remplacer les espaces et tirets par un seul tiret
+        value = re.sub('[-\s]+', '-', value)
+        return value
     return None
 
-# Route to get songs by page
-@app.route('/hita/rehetra', methods=['GET'])
-def get_songs():
-    page = request.args.get('page', 1, type=int)
-    try:
-        songs = scrape_page(page)
-        return jsonify({'page': page, 'songs': songs})
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# Fonction pour générer l'URL de la chanson dynamiquement
+def find_song_url(artist, title):
+    base_url = 'https://tononkira.serasera.org'
+    artist_slug = slugify(artist)  # Générer le slug de l'artiste
+    title_slug = slugify(title)  # Générer le slug du titre
 
-# Route to get the lyrics of a song
+    if artist_slug and title_slug:
+        # Générer l'URL dynamique en fonction de l'artiste et du titre
+        song_url = f'{base_url}/hira/{artist_slug}/{title_slug}'
+        # Vérifier si l'URL existe
+        response = requests.get(song_url)
+        if response.status_code == 200:
+            return song_url
+    return None
+
+# Fonction pour extraire les paroles à partir du HTML
+def scrape_lyrics_from_html(html_text):
+    soup = BeautifulSoup(html_text, 'html.parser')
+    # Trouver la division principale contenant les paroles
+    main_div = soup.find('div', class_='col-md-8')
+
+    if not main_div:
+        return None
+
+    # Trouver la balise <h2> qui contient le titre de la chanson
+    h2 = main_div.find('h2')
+    if not h2:
+        return None
+
+    # Trouver la division avec la classe 'fst-italic' (indicateur de début des paroles)
+    fst_italic_div = main_div.find('div', class_='fst-italic')
+    if not fst_italic_div:
+        return None
+
+    # Rassembler les paroles en parcourant les éléments suivants
+    lyrics_content = []
+    for sibling in fst_italic_div.next_siblings:
+        # Arrêter si on atteint une division qui marque la fin des paroles
+        if sibling.name == 'div' and 'mw-100' in sibling.get('class', []):
+            break
+        if sibling.name == 'br':
+            lyrics_content.append('\n')
+        elif sibling.string:
+            lyrics_content.append(sibling.string.strip())
+        else:
+            lyrics_content.append(sibling.get_text(separator='\n').strip())
+
+    lyrics = ''.join(lyrics_content).strip()
+    return lyrics
+
+# Route pour obtenir les paroles d'une chanson avec un URL dynamique
 @app.route('/parole', methods=['GET'])
 def get_lyrics():
-    texte = request.args.get('texte')  # Text format is 'artist-title'
+    artist = request.args.get('artist')
+    title = request.args.get('title')
 
-    if not texte:
-        return jsonify({'error': 'Please provide the text parameter'}), 400
+    if not artist or not title:
+        return jsonify({'error': 'Veuillez fournir les paramètres "artist" et "title"'}), 400
 
     try:
-        song_url = find_song_url(texte)
+        # Construire l'URL de la chanson en fonction de l'artiste et du titre
+        song_url = find_song_url(artist, title)
         if not song_url:
-            return jsonify({'error': 'Song not found'}), 404
+            return jsonify({'error': 'Chanson non trouvée'}), 404
 
-        lyrics = scrape_lyrics(song_url)
+        # Récupérer la page HTML de la chanson
+        response = requests.get(song_url)
+        if response.status_code != 200:
+            return jsonify({'error': 'Chanson non trouvée'}), 404
+
+        # Extraire les paroles
+        lyrics = scrape_lyrics_from_html(response.text)
         if not lyrics:
-            return jsonify({'error': 'Lyrics not found'}), 404
+            return jsonify({'error': 'Paroles non trouvées'}), 404
 
-        return jsonify({'texte': texte, 'lyrics': lyrics})
+        # Retourner les paroles
+        return jsonify({'artist': artist, 'title': title, 'lyrics': lyrics})
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Lancement du serveur Flask sur host 0.0.0.0 et port 5000
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000, debug=True)
+    
