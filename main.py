@@ -1,69 +1,99 @@
-from flask import Flask, request, jsonify
-from bs4 import BeautifulSoup
+from flask import Flask, jsonify, request
 import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
-# Fonction pour extraire les données de la chanson
-def get_song_data(song_url):
-    # Envoyer la requête GET à l'URL
-    response = requests.get(song_url)
-    soup = BeautifulSoup(response.content, 'html.parser')
-    
-    # Vérifier la présence du titre de la chanson (balise h1 ou autre)
-    title_element = soup.find('h1')
-    title = title_element.get_text(strip=True) if title_element else 'Title not found'
+# Function to scrape songs from a specific page
+def scrape_page(page_number):
+    url = f'https://tononkira.serasera.org/hira/?page={page_number}'
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
 
-    # Vérifier la présence de l'artiste (balise h2 ou autre)
-    artist_element = soup.find('h2')
-    artist = artist_element.get_text(strip=True) if artist_element else 'Artist not found'
-
-    # Chercher les paroles (lyrics) dans un div avec class 'song-text' (adapter si nécessaire)
-    lyrics_div = soup.find('div', class_='song-text')
-    lyrics = lyrics_div.get_text("\n", strip=True) if lyrics_div else 'Lyrics not found'
-
-    # Retourner les données sous forme de dictionnaire
-    return {
-        'title': title,
-        'artist': artist,
-        'lyrics': lyrics
-    }
-
-# Route pour rechercher un chanteur et retourner les chansons (exemple basique)
-@app.route('/search', methods=['GET'])
-def search_songs():
-    singer = request.args.get('singer')
-    if not singer:
-        return jsonify({'error': 'Singer not specified'}), 400
-    
-    # Exemple d'URL de recherche (adapter si nécessaire)
-    search_url = f'https://tononkira.serasera.org/search?q={singer}'
-    
-    response = requests.get(search_url)
-    soup = BeautifulSoup(response.content, 'html.parser')
-    
-    # Extraire les liens vers les chansons (à adapter selon la structure HTML)
-    song_links = soup.find_all('a', href=True, text=True)
     songs = []
-    for link in song_links:
-        songs.append({
-            'title': link.get_text(strip=True),
-            'url': link['href']
-        })
-    
-    return jsonify({'singer': singer, 'songs': songs})
+    song_items = soup.find_all('div', class_='border p-2 mb-3')  # Each song is in this div
 
-# Route pour obtenir les détails d'une chanson
-@app.route('/song', methods=['GET'])
-def get_song():
-    song_url = request.args.get('url')
-    if not song_url:
-        return jsonify({'error': 'Song URL not specified'}), 400
-    
-    # Appeler la fonction pour extraire les données de la chanson
-    song_data = get_song_data(song_url)
-    
-    return jsonify(song_data)
+    for item in song_items:
+        # Extract the title from the link
+        title_tag = item.find('a')
+        title = title_tag.text.strip()
+
+        # Extract the artist name
+        artist_tag = title_tag.find_next('a')
+        artist = artist_tag.text.strip()
+
+        # Extract the number of likes (number after the heart icon)
+        likes_tag = item.find('i', class_='bi-heart-fill')
+        likes = likes_tag.find_next(text=True).strip()
+
+        songs.append({
+            'title': title,
+            'artist': artist,
+            'likes': likes
+        })
+
+    return songs
+
+# Function to scrape the lyrics page
+def scrape_lyrics(song_url):
+    response = requests.get(song_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    # Find the section that contains the lyrics
+    lyrics_div = soup.find('div', class_='fst-italic')  # Adjust this based on your page structure
+    if not lyrics_div:
+        return None
+
+    # Extract the lyrics
+    lyrics = lyrics_div.get_text(separator='\n').strip()
+    return lyrics
+
+# Function to search for a song's URL based on the text
+def find_song_url(texte):
+    base_url = 'https://tononkira.serasera.org'
+    search_url = f'{base_url}/tononkira?lohateny={texte}'
+
+    response = requests.get(search_url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    # Find the link to the song page
+    song_link = soup.find('a', href=True, text=texte)
+    if song_link:
+        return base_url + song_link['href']
+    return None
+
+# Route to get songs by page
+@app.route('/hita/rehetra', methods=['GET'])
+def get_songs():
+    page = request.args.get('page', 1, type=int)
+    try:
+        songs = scrape_page(page)
+        return jsonify({'page': page, 'songs': songs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Route to get the lyrics of a song
+@app.route('/parole', methods=['GET'])
+def get_lyrics():
+    texte = request.args.get('texte')  # Text format is 'artist-title'
+
+    if not texte:
+        return jsonify({'error': 'Please provide the text parameter'}), 400
+
+    try:
+        song_url = find_song_url(texte)
+        if not song_url:
+            return jsonify({'error': 'Song not found'}), 404
+
+        lyrics = scrape_lyrics(song_url)
+        if not lyrics:
+            return jsonify({'error': 'Lyrics not found'}), 404
+
+        return jsonify({'texte': texte, 'lyrics': lyrics})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000)
+    
