@@ -24,7 +24,10 @@ def scrape_page(page_number):
 
         # Extract the number of likes (number after the heart icon)
         likes_tag = item.find('i', class_='bi-heart-fill')
-        likes = likes_tag.find_next(text=True).strip()
+        if likes_tag:
+            likes = likes_tag.find_next(string=True).strip()
+        else:
+            likes = '0'
 
         songs.append({
             'title': title,
@@ -48,16 +51,16 @@ def scrape_lyrics(song_url):
     lyrics = lyrics_div.get_text(separator='\n').strip()
     return lyrics
 
-# Function to search for a song's URL based on the text
+# Function to search for a song's URL based on the title and artist
 def find_song_url(texte):
     base_url = 'https://tononkira.serasera.org'
-    search_url = f'{base_url}/tononkira?lohateny={texte}'
-
+    search_url = f'{base_url}/tononkira?lohateny={texte.replace(" ", "%20")}'
+    
     response = requests.get(search_url)
     soup = BeautifulSoup(response.text, 'html.parser')
 
-    # Find the link to the song page
-    song_link = soup.find('a', href=True, text=texte)
+    # Find the link to the song page (adjusted to be more flexible)
+    song_link = soup.find('a', href=True, string=lambda s: texte.lower() in s.lower())  # Make the search case-insensitive
     if song_link:
         return base_url + song_link['href']
     return None
@@ -95,5 +98,5 @@ def get_lyrics():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
-    
+    app.run(debug=True)
+            
