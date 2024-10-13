@@ -107,7 +107,7 @@ def scrape_lyrics_from_html(html_text):
     return lyrics
 
 # Route pour obtenir les chansons par page
-@app.route('/hita/rehetra', methods=['GET'])
+@app.route('/hira/rehetra', methods=['GET'])
 def get_songs():
     page = request.args.get('page', 1, type=int)
     try:
