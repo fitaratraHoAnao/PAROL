@@ -43,11 +43,6 @@ def scrape_lyrics_from_html(html_text):
     if not main_div:
         return None
 
-    # Trouver la balise <h2> qui contient le titre de la chanson
-    h2 = main_div.find('h2')
-    if not h2:
-        return None
-
     # Trouver la division avec la classe 'fst-italic' (indicateur de début des paroles)
     fst_italic_div = main_div.find('div', class_='fst-italic')
     if not fst_italic_div:
@@ -68,6 +63,49 @@ def scrape_lyrics_from_html(html_text):
 
     lyrics = ''.join(lyrics_content).strip()
     return lyrics
+
+# Route pour obtenir les chansons par page
+@app.route('/hita/rehetra', methods=['GET'])
+def get_songs():
+    page = request.args.get('page', 1, type=int)
+    try:
+        songs = scrape_page(page)
+        return jsonify({'page': page, 'songs': songs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Fonction pour extraire les chansons d'une page spécifique
+def scrape_page(page_number):
+    url = f'https://tononkira.serasera.org/hira/?page={page_number}'
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    songs = []
+    song_items = soup.find_all('div', class_='border p-2 mb-3')  # Chaque chanson est dans cette div
+
+    for item in song_items:
+        # Extraire le titre du lien
+        title_tag = item.find('a')
+        title = title_tag.text.strip()
+
+        # Extraire le nom de l'artiste
+        artist_tag = title_tag.find_next('a')
+        artist = artist_tag.text.strip()
+
+        # Extraire le nombre de likes
+        likes_tag = item.find('i', class_='bi-heart-fill')
+        if likes_tag:
+            likes = likes_tag.find_next(string=True).strip()
+        else:
+            likes = '0'
+
+        songs.append({
+            'title': title,
+            'artist': artist,
+            'likes': likes
+        })
+
+    return songs
 
 # Route pour obtenir les paroles d'une chanson avec un URL dynamique
 @app.route('/parole', methods=['GET'])
